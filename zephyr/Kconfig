@@ -1,0 +1,41 @@
+config BUTTON_SMF
+	bool "button state machine framework library"
+    select SMF
+    select EVENTS
+    select GPIO
+    help
+        This library provides a button device driver that can be used to
+        register callbacks for button events. It also provides a dts binding
+        for buttons.
+
+if BUTTON_SMF
+
+config BUTTON_SMF_DEBOUNCE_TIME_MS
+    int "Button debounce time (ms)"
+    default 50
+    help
+        This option sets the debounce time for buttons. This option can be
+        overridden by defining CONFIG_BUTTON_SMF_DEBOUNCE_TIME_MS in the
+        application.
+
+config BUTTON_SMF_MAX_PRESSED_CALLBACKS
+    int "Maximum number of pressed callbacks"
+    default 3
+    help
+        This option sets the maximum number of pressed callbacks that can be
+        registered. This option can be overridden by defining
+        CONFIG_BUTTON_SMF_MAX_PRESSED_CALLBACKS in the application.
+
+config BUTTON_SMF_MAX_RELEASE_CALLBACKS
+    int "Maximum number of release callbacks"
+    default 3
+    help
+        This option sets the maximum number of release callbacks that can be
+        registered. This option can be overridden by defining
+        CONFIG_BUTTON_SMF_MAX_RELEASE_CALLBACKS in the application.
+
+module = BUTTON_SMF
+module-str = button smf library
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # BUTTON_SMF
