@@ -402,3 +402,18 @@ int button_smf_register_callback(struct button_smf_data_t *button_smf,
     k_mutex_unlock(&button_smf->lock);
     return ret;
 }
+
+int button_smf_register_double_click_callback(struct button_smf_data_t *button_smf,
+                                              button_callback_cb_t cb)
+{
+    if (!button_smf || !cb)
+    {
+        return -EINVAL;
+    }
+
+    k_mutex_lock(&button_smf->lock, K_FOREVER);
+    button_smf->double_click_cb = cb;
+    k_mutex_unlock(&button_smf->lock);
+
+    return 0;
+}
