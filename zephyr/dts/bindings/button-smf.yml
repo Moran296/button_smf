@@ -1,0 +1,12 @@
+description: Button state machine driver for button-smf library
+
+compatible: "button-smf"
+
+child-binding:
+  description: Button state machine child node
+  properties:
+    gpio-key:
+      type: phandle-array
+      required: true
+      description: |
+        The GPIO that is connected to the button.

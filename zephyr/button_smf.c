@@ -417,3 +417,22 @@ int button_smf_register_double_click_callback(struct button_smf_data_t *button_s
 
     return 0;
 }
+
+// ============================= DT ================================
+
+/*
+#define BUTTON_SMF_DEFINE(inst)                                                \
+    static int button_smf_##inst##_init(const struct device *dev)              \
+    {                                                                          \
+        return button_smf_init(&button_smf_##inst, &button_gpio_##inst, NULL); \
+    }                                                                          \
+    static const struct button_smf_config_t button_smf_config_##inst = {       \
+        .button_gpio = DEVICE_DT_GET_OR_NULL(DT_INST_PHANDLE(inst, input)),    \
+    };                                                                         \
+    static struct button_smf_data_t button_smf_##inst = {                      \
+        .config = &button_smf_config_##inst,                                   \
+    } DEVICE_DT_INST_DEFINE(inst, button_smf_##inst##_init, NULL, &button_smf_##inst, &button_smf_config_##inst, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEVICE, NULL);
+
+#define DT_DRV_COMPAT button_smf
+DT_INST_FOREACH_STATUS_OKAY(BUTTON_SMF_DEFINE)
+*/

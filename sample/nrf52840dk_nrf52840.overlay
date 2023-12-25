@@ -1,0 +1,14 @@
+// / {
+
+    //     aliases {
+        //         button0 = &button-0;
+    //     };
+
+    //     my_button_smf: my_button_smf {
+        //         compatible = "button-smf";
+
+        //         button-0: button-0 {
+            //             gpio-key = <&gpio0 11 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+        //         };
+    //     };
+// };
