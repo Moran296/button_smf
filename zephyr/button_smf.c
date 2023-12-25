@@ -6,7 +6,10 @@ LOG_MODULE_REGISTER(button_smf, CONFIG_BUTTON_SMF_LOG_LEVEL);
 enum button_state
 {
     BUTTON_STATE_IDLE,
-    BUTTON_STATE_PRESSED,
+#if IS_ENABLED(CONFIG_BUTTON_SMF_DOUBLE_CLICK)
+    BUTTON_STATE_DOUBLE_CLICK,
+#endif
+    BUTTON_STATE_PRESSED
 };
 
 enum button_event
@@ -19,15 +22,23 @@ enum button_event
 static void idle_entry(void *o);
 static void idle_run(void *o);
 static void idle_exit(void *o);
+#if IS_ENABLED(CONFIG_BUTTON_SMF_DOUBLE_CLICK)
+static void double_click_pend_entry(void *o);
+static void double_click_pend_run(void *o);
+static void double_click_pend_exit(void *o);
+#endif
 static void pressed_entry(void *o);
 static void pressed_run(void *o);
 static void pressed_exit(void *o);
 
 const struct smf_state button_states[] = {
     [BUTTON_STATE_IDLE] = SMF_CREATE_STATE(idle_entry, idle_run, idle_exit),
+#if IS_ENABLED(CONFIG_BUTTON_SMF_DOUBLE_CLICK)
+    [BUTTON_STATE_DOUBLE_CLICK] = SMF_CREATE_STATE(double_click_pend_entry, double_click_pend_run, double_click_pend_exit),
+#endif
     [BUTTON_STATE_PRESSED] = SMF_CREATE_STATE(pressed_entry, pressed_run, pressed_exit)};
 
-static void execute_button_press_cb(struct button_smf_t *button_smf)
+static void execute_button_press_cb(struct button_smf_data_t *button_smf)
 {
     uint8_t i = button_smf->next_press_cb_index;
     k_timeout_t current_cb_time = button_smf->button_pressed_cb[i].cb_time;
@@ -52,7 +63,7 @@ static void execute_button_press_cb(struct button_smf_t *button_smf)
     button_smf->next_press_cb_index = i;
 }
 
-static void execute_button_release_cb(struct button_smf_t *button_smf)
+static void execute_button_release_cb(struct button_smf_data_t *button_smf)
 {
     k_ticks_t now = k_uptime_ticks();
     k_ticks_t press_duration = now - button_smf->button_press_time;
@@ -83,7 +94,7 @@ static void execute_button_release_cb(struct button_smf_t *button_smf)
     }
 }
 
-static void reschedule_long_press_work(struct button_smf_t *button_smf)
+static void reschedule_long_press_work(struct button_smf_data_t *button_smf)
 {
     int i = button_smf->next_press_cb_index;
 
@@ -113,7 +124,7 @@ static void reschedule_long_press_work(struct button_smf_t *button_smf)
 
 static void idle_entry(void *o)
 {
-    struct button_smf_t *button_smf = (struct button_smf_t *)o;
+    struct button_smf_data_t *button_smf = (struct button_smf_data_t *)o;
 
     button_smf->next_press_cb_index = 0;
     button_smf->button_press_time = 0;
@@ -121,17 +132,19 @@ static void idle_entry(void *o)
 
 static void idle_run(void *o)
 {
-    struct button_smf_t *button_smf = (struct button_smf_t *)o;
+    struct button_smf_data_t *button_smf = (struct button_smf_data_t *)o;
     uint32_t events = button_smf->button_event.events;
 
     k_event_clear(&button_smf->button_event, 0xFF);
     if (events & BUTTON_EVENT_PRESS)
     {
+#if IS_ENABLED(CONFIG_BUTTON_SMF_DOUBLE_CLICK)
+        // go to double click pending state only if double click callback is registered
+        enum button_state state = button_smf->double_click_cb == NULL ? BUTTON_STATE_PRESSED : BUTTON_STATE_DOUBLE_CLICK;
+        smf_set_state(SMF_CTX(button_smf), &button_states[state]);
+#else
         smf_set_state(SMF_CTX(button_smf), &button_states[BUTTON_STATE_PRESSED]);
-    }
-    else
-    {
-        LOG_WRN("Unknown button event for idle state: %d", button_smf->button_event.events);
+#endif
     }
 }
 
@@ -142,17 +155,18 @@ static void idle_exit(void *o)
 
 static void pressed_entry(void *o)
 {
-    struct button_smf_t *button_smf = (struct button_smf_t *)o;
+    struct button_smf_data_t *button_smf = (struct button_smf_data_t *)o;
 
     button_smf->button_press_time = k_uptime_ticks();
     button_smf->next_press_cb_index = 0;
+
     execute_button_press_cb(button_smf);
     reschedule_long_press_work(button_smf);
 }
 
 static void pressed_run(void *o)
 {
-    struct button_smf_t *button_smf = (struct button_smf_t *)o;
+    struct button_smf_data_t *button_smf = (struct button_smf_data_t *)o;
 
     uint32_t events = button_smf->button_event.events;
     k_event_clear(&button_smf->button_event, 0xFF);
@@ -174,17 +188,61 @@ static void pressed_run(void *o)
 
 static void pressed_exit(void *o)
 {
-    struct button_smf_t *button_smf = (struct button_smf_t *)o;
+    struct button_smf_data_t *button_smf = (struct button_smf_data_t *)o;
 
     k_work_cancel_delayable(&button_smf->button_long_press_work);
 
     execute_button_release_cb(button_smf);
 }
 
+#if IS_ENABLED(CONFIG_BUTTON_SMF_DOUBLE_CLICK)
+static void double_click_pend_entry(void *o)
+{
+    struct button_smf_data_t *button_smf = (struct button_smf_data_t *)o;
+    k_work_reschedule(&button_smf->button_long_press_work, K_MSEC(CONFIG_BUTTON_SMF_DOUBLE_CLICK_DELAY_MS));
+}
+
+static void double_click_pend_run(void *o)
+{
+    struct button_smf_data_t *button_smf = (struct button_smf_data_t *)o;
+    bool state;
+
+    uint32_t events = button_smf->button_event.events;
+    k_event_clear(&button_smf->button_event, 0xFF);
+    if (events & BUTTON_EVENT_PRESS)
+    {
+        LOG_DBG("double click -> second press detected, running cb");
+        button_smf->double_click_cb(button_smf->user_data);
+        smf_set_state(SMF_CTX(button_smf), &button_states[BUTTON_STATE_IDLE]);
+    }
+    if (events & BUTTON_EVENT_RELEASE)
+    {
+        LOG_DBG("double click -> release detected, waiting for second press/timeout");
+    }
+    else if (events & BUTTON_EVENT_TIMEOUT)
+    {
+        smf_set_state(SMF_CTX(button_smf), &button_states[BUTTON_STATE_PRESSED]);
+        state = gpio_pin_get_dt(button_smf->config.button_gpio);
+        if (!state)
+        {
+            // if was released and not double clicked, go to press and then handle release
+            k_event_set(&button_smf->button_event, BUTTON_EVENT_RELEASE);
+            smf_run_state(SMF_CTX(button_smf));
+        }
+    }
+}
+
+static void double_click_pend_exit(void *o)
+{
+    struct button_smf_data_t *button_smf = (struct button_smf_data_t *)o;
+    k_work_cancel_delayable(&button_smf->button_long_press_work);
+}
+#endif
+
 static void button_long_press_work_cb(struct k_work *work)
 {
     int ret;
-    struct button_smf_t *button_smf = CONTAINER_OF(work, struct button_smf_t, button_long_press_work);
+    struct button_smf_data_t *button_smf = CONTAINER_OF(work, struct button_smf_data_t, button_long_press_work);
 
     k_mutex_lock(&button_smf->lock, K_FOREVER);
 
@@ -203,11 +261,11 @@ static void button_debounce_work_cb(struct k_work *work)
 {
     int state;
     int ret;
-    struct button_smf_t *button_smf = CONTAINER_OF(work, struct button_smf_t, button_debounce_work);
+    struct button_smf_data_t *button_smf = CONTAINER_OF(work, struct button_smf_data_t, button_debounce_work);
 
     k_mutex_lock(&button_smf->lock, K_FOREVER);
 
-    state = gpio_pin_get_dt(button_smf->button_gpio);
+    state = gpio_pin_get_dt(button_smf->config.button_gpio);
     LOG_DBG("button %s", state ? "pressed" : "released");
     k_event_set(&button_smf->button_event, state ? BUTTON_EVENT_PRESS : BUTTON_EVENT_RELEASE);
 
@@ -223,7 +281,7 @@ static void button_debounce_work_cb(struct k_work *work)
 static void button_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
     // reschedule debounce work for CONFIG_BUTTON_DEBOUNCE_TIME_MS
-    struct button_smf_t *button_smf = CONTAINER_OF(cb, struct button_smf_t, button_cb_data);
+    struct button_smf_data_t *button_smf = CONTAINER_OF(cb, struct button_smf_data_t, button_cb_data);
     k_work_reschedule(&button_smf->button_debounce_work, K_MSEC(CONFIG_BUTTON_SMF_DEBOUNCE_TIME_MS));
 }
 
@@ -265,12 +323,12 @@ static int insert_sorted(struct button_callback_t *button_cb, size_t len, k_time
 
 // ============================= API ================================
 
-int button_smf_init(struct button_smf_t *button_smf, const struct gpio_dt_spec *button_gpio, void *user_data)
+int button_smf_init(struct button_smf_data_t *button_smf, const struct gpio_dt_spec *button_gpio, void *user_data)
 {
     int ret;
 
     button_smf->user_data = user_data;
-    button_smf->button_gpio = button_gpio;
+    button_smf->config.button_gpio = button_gpio;
 
     memset(button_smf->button_pressed_cb, 0, sizeof(button_smf->button_pressed_cb));
     memset(button_smf->button_released_cb, 0, sizeof(button_smf->button_released_cb));
@@ -314,7 +372,7 @@ int button_smf_init(struct button_smf_t *button_smf, const struct gpio_dt_spec *
     return 0;
 }
 
-int button_smf_register_callback(struct button_smf_t *button_smf,
+int button_smf_register_callback(struct button_smf_data_t *button_smf,
                                  enum button_smf_event_type event,
                                  button_callback_cb_t cb,
                                  k_timeout_t timeout)

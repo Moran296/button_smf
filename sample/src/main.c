@@ -4,6 +4,11 @@
 
 LOG_MODULE_REGISTER(main);
 
+void double_click(void *user_data)
+{
+        LOG_INF("double click!!!\n");
+}
+
 void button_pressed(void *user_data)
 {
         LOG_INF("button pressed\n");
@@ -14,7 +19,7 @@ void button_released(void *user_data)
 }
 
 static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET(DT_ALIAS(sw0), gpios);
-struct button_smf_t button_smf;
+struct button_smf_data_t button_smf;
 
 void fast_press(void *user_data)
 {
@@ -72,6 +77,8 @@ int main(void)
         button_smf_register_callback(&button_smf, BUTTON_SMF_RELEASE, fast_release, K_NO_WAIT);
         button_smf_register_callback(&button_smf, BUTTON_SMF_RELEASE, long_release, K_SECONDS(5));
         button_smf_register_callback(&button_smf, BUTTON_SMF_RELEASE, longest_release, K_SECONDS(10));
+
+        button_smf_register_double_click_callback(&button_smf, double_click);
 
         LOG_INF("Sample app started");
         return 0;

@@ -34,6 +34,26 @@ config BUTTON_SMF_MAX_RELEASE_CALLBACKS
         registered. This option can be overridden by defining
         CONFIG_BUTTON_SMF_MAX_RELEASE_CALLBACKS in the application.
 
+config BUTTON_SMF_DOUBLE_CLICK
+    bool "Enable double click detection"
+    default n
+    help
+        This option enables double click detection. This option can be
+        overridden by defining CONFIG_BUTTON_SMF_DOUBLE_CLICK in the
+        application.
+
+if BUTTON_SMF_DOUBLE_CLICK
+
+config BUTTON_SMF_DOUBLE_CLICK_DELAY_MS
+    int "Double click time (ms)"
+    default 500
+    help
+        This option sets the double click time. Any press event that occurs will wait
+        for this time before considered a click.
+
+endif # BUTTON_SMF_DOUBLE_CLICK
+
+
 module = BUTTON_SMF
 module-str = button smf library
 source "subsys/logging/Kconfig.template.log_config"

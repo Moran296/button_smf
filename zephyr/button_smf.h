@@ -11,7 +11,6 @@ enum button_smf_event_type
 {
     BUTTON_SMF_PRESS,
     BUTTON_SMF_RELEASE,
-    // TODO: double click
 };
 
 typedef void (*button_callback_cb_t)(void *user_data);
@@ -22,7 +21,12 @@ struct button_callback_t
     button_callback_cb_t cb;
 };
 
-struct button_smf_t
+struct button_smf_config_t
+{
+    const struct gpio_dt_spec *button_gpio;
+};
+
+struct button_smf_data_t
 {
     struct smf_ctx ctx;
     struct k_mutex lock;
@@ -31,6 +35,10 @@ struct button_smf_t
     struct k_work_delayable button_long_press_work;
     struct gpio_callback button_cb_data;
 
+#if IS_ENABLED(CONFIG_BUTTON_SMF_DOUBLE_CLICK)
+    button_callback_cb_t double_click_cb;
+#endif
+
     k_ticks_t button_press_time;
     uint8_t next_press_cb_index;
 
@@ -38,14 +46,17 @@ struct button_smf_t
     struct button_callback_t button_released_cb[CONFIG_BUTTON_SMF_MAX_RELEASE_CALLBACKS];
 
     void *user_data;
-    const struct gpio_dt_spec *button_gpio;
+
+    struct button_smf_config_t config;
 };
 
-int button_smf_init(struct button_smf_t *button_smf, const struct gpio_dt_spec *button_gpio, void *user_data);
+int button_smf_init(struct button_smf_data_t *button_smf, const struct gpio_dt_spec *button_gpio, void *user_data);
 
-int button_smf_register_callback(struct button_smf_t *button_smf,
+int button_smf_register_callback(struct button_smf_data_t *button_smf,
                                  enum button_smf_event_type event,
                                  button_callback_cb_t cb,
                                  k_timeout_t timeout);
 
+int button_smf_register_double_click_callback(struct button_smf_data_t *button_smf,
+                                              button_callback_cb_t cb);
 #endif // BUTTON_SMF_H
