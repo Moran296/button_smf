@@ -7,6 +7,40 @@
 
 LOG_MODULE_REGISTER(button_smf, CONFIG_BUTTON_SMF_LOG_LEVEL);
 
+enum button_smf_event_type
+{
+    BUTTON_SMF_PRESS,
+    BUTTON_SMF_RELEASE,
+};
+
+struct button_callback_t
+{
+    k_timeout_t cb_time;
+    button_callback_cb_t cb;
+};
+
+struct button_smf_data_t
+{
+    struct smf_ctx ctx;
+    struct k_mutex lock;
+    struct k_event button_event;
+    struct k_work_delayable button_debounce_work;
+    struct k_work_delayable button_long_press_work;
+    struct gpio_callback button_cb_data;
+
+#if IS_ENABLED(CONFIG_BUTTON_SMF_DOUBLE_CLICK)
+    button_callback_cb_t double_click_cb;
+#endif
+
+    k_ticks_t button_press_time;
+    uint8_t next_press_cb_index;
+
+    struct button_callback_t button_pressed_cb[CONFIG_BUTTON_SMF_MAX_PRESSED_CALLBACKS];
+    struct button_callback_t button_released_cb[CONFIG_BUTTON_SMF_MAX_RELEASE_CALLBACKS];
+
+    const struct gpio_dt_spec button_gpio;
+};
+
 enum button_state
 {
     BUTTON_STATE_IDLE,
@@ -44,6 +78,7 @@ const struct smf_state button_states[] = {
 
 static void execute_button_press_cb(struct button_smf_data_t *button_smf)
 {
+    struct device *dev = CONTAINER_OF(button_smf, struct device, data);
     uint8_t i = button_smf->next_press_cb_index;
     k_timeout_t current_cb_time = button_smf->button_pressed_cb[i].cb_time;
 
@@ -56,7 +91,7 @@ static void execute_button_press_cb(struct button_smf_data_t *button_smf)
         if (is_cb_time && is_cb_exists)
         {
             LOG_DBG("Executing button pressed callback: %d", i);
-            button_smf->button_pressed_cb[i].cb(button_smf->user_data);
+            button_smf->button_pressed_cb[i].cb(dev);
         }
         else
         {
@@ -69,6 +104,7 @@ static void execute_button_press_cb(struct button_smf_data_t *button_smf)
 
 static void execute_button_release_cb(struct button_smf_data_t *button_smf)
 {
+    struct device *dev = CONTAINER_OF(button_smf, struct device, data);
     k_ticks_t now = k_uptime_ticks();
     k_ticks_t press_duration = now - button_smf->button_press_time;
 
@@ -94,7 +130,7 @@ static void execute_button_release_cb(struct button_smf_data_t *button_smf)
     if (button_released_cb != NULL)
     {
         LOG_DBG("Executing button released callback");
-        button_released_cb->cb(button_smf->user_data);
+        button_released_cb->cb(dev);
     }
 }
 
@@ -209,6 +245,7 @@ static void double_click_pend_entry(void *o)
 static void double_click_pend_run(void *o)
 {
     struct button_smf_data_t *button_smf = (struct button_smf_data_t *)o;
+    struct device *dev = CONTAINER_OF(button_smf, struct device, data);
     bool state;
 
     uint32_t events = button_smf->button_event.events;
@@ -216,7 +253,7 @@ static void double_click_pend_run(void *o)
     if (events & BUTTON_EVENT_PRESS)
     {
         LOG_DBG("double click -> second press detected, running cb");
-        button_smf->double_click_cb(button_smf->user_data);
+        button_smf->double_click_cb(dev);
         smf_set_state(SMF_CTX(button_smf), &button_states[BUTTON_STATE_IDLE]);
     }
     if (events & BUTTON_EVENT_RELEASE)
@@ -325,13 +362,9 @@ static int insert_sorted(struct button_callback_t *button_cb, size_t len, k_time
     return -ENOMEM;
 }
 
-// ============================= API ================================
-
-int button_smf_init(struct button_smf_data_t *button_smf, void *user_data)
+static int button_smf_init(struct button_smf_data_t *button_smf)
 {
     int ret;
-
-    button_smf->user_data = user_data;
 
     memset(button_smf->button_pressed_cb, 0, sizeof(button_smf->button_pressed_cb));
     memset(button_smf->button_released_cb, 0, sizeof(button_smf->button_released_cb));
@@ -375,10 +408,10 @@ int button_smf_init(struct button_smf_data_t *button_smf, void *user_data)
     return 0;
 }
 
-int button_smf_register_callback(struct button_smf_data_t *button_smf,
-                                 enum button_smf_event_type event,
-                                 button_callback_cb_t cb,
-                                 k_timeout_t timeout)
+static int button_smf_register_callback(struct button_smf_data_t *button_smf,
+                                        enum button_smf_event_type event,
+                                        button_callback_cb_t cb,
+                                        k_timeout_t timeout)
 {
     int ret = 0;
 
@@ -406,9 +439,26 @@ int button_smf_register_callback(struct button_smf_data_t *button_smf,
     return ret;
 }
 
-int button_smf_register_double_click_callback(struct button_smf_data_t *button_smf,
+// ============================= API ================================
+
+int button_smf_register_press_cb(const struct device *button_smf,
+                                 button_callback_cb_t cb,
+                                 k_timeout_t timeout)
+{
+    return button_smf_register_callback(button_smf->data, BUTTON_SMF_PRESS, cb, timeout);
+}
+
+int button_smf_register_release_cb(const struct device *button_smf,
+                                   button_callback_cb_t cb,
+                                   k_timeout_t timeout)
+{
+    return button_smf_register_callback(button_smf->data, BUTTON_SMF_RELEASE, cb, timeout);
+}
+
+int button_smf_register_double_click_callback(const struct device *dev,
                                               button_callback_cb_t cb)
 {
+    struct button_smf_data_t *button_smf = dev->data;
     if (!button_smf || !cb)
     {
         return -EINVAL;
@@ -422,14 +472,15 @@ int button_smf_register_double_click_callback(struct button_smf_data_t *button_s
 }
 
 // ============================= DT ================================
+#define DT_DRV_COMPAT buttonsmf
 
 #define BUTTON_SMF_DEFINE(inst)                                                 \
     static struct button_smf_data_t button_smf_##inst = {                       \
-        .button_gpio = GPIO_DT_SPEC_INST_GET(i, input_gpios)};                  \
+        .button_gpio = GPIO_DT_SPEC_INST_GET(inst, input_gpios)};               \
     static int button_smf_##inst##_init(const struct device *dev)               \
     {                                                                           \
         struct button_smf_data_t *data = (struct button_smf_data_t *)dev->data; \
-        return button_smf_init(data, NULL);                                     \
+        return button_smf_init(data);                                           \
     }                                                                           \
     DEVICE_DT_INST_DEFINE(inst,                                                 \
                           button_smf_##inst##_init,                             \
@@ -439,5 +490,4 @@ int button_smf_register_double_click_callback(struct button_smf_data_t *button_s
                           APPLICATION,                                          \
                           CONFIG_KERNEL_INIT_PRIORITY_DEVICE, NULL);
 
-#define DT_DRV_COMPAT button_smf
 DT_INST_FOREACH_STATUS_OKAY(BUTTON_SMF_DEFINE)

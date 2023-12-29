@@ -4,8 +4,8 @@
     // };
 
 
-    buttonsmf0: buttonsmf_0 {
-        compatible = "button-smf";
+    buttonsmf0: buttonsmf {
+        compatible = "buttonsmf";
 
         input-gpios = <&gpio0 11 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
     };

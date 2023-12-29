@@ -1,6 +1,6 @@
 description: Button state machine driver for button-smf library
 
-compatible: "button-smf"
+compatible: "buttonsmf"
 
 include: base.yaml
 
