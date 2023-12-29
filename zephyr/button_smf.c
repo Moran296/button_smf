@@ -1,4 +1,8 @@
 #include <zephyr/logging/log.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/init.h>
 #include "button_smf.h"
 
 LOG_MODULE_REGISTER(button_smf, CONFIG_BUTTON_SMF_LOG_LEVEL);
@@ -222,7 +226,7 @@ static void double_click_pend_run(void *o)
     else if (events & BUTTON_EVENT_TIMEOUT)
     {
         smf_set_state(SMF_CTX(button_smf), &button_states[BUTTON_STATE_PRESSED]);
-        state = gpio_pin_get_dt(button_smf->config.button_gpio);
+        state = gpio_pin_get_dt(&button_smf->button_gpio);
         if (!state)
         {
             // if was released and not double clicked, go to press and then handle release
@@ -265,7 +269,7 @@ static void button_debounce_work_cb(struct k_work *work)
 
     k_mutex_lock(&button_smf->lock, K_FOREVER);
 
-    state = gpio_pin_get_dt(button_smf->config.button_gpio);
+    state = gpio_pin_get_dt(&button_smf->button_gpio);
     LOG_DBG("button %s", state ? "pressed" : "released");
     k_event_set(&button_smf->button_event, state ? BUTTON_EVENT_PRESS : BUTTON_EVENT_RELEASE);
 
@@ -323,23 +327,22 @@ static int insert_sorted(struct button_callback_t *button_cb, size_t len, k_time
 
 // ============================= API ================================
 
-int button_smf_init(struct button_smf_data_t *button_smf, const struct gpio_dt_spec *button_gpio, void *user_data)
+int button_smf_init(struct button_smf_data_t *button_smf, void *user_data)
 {
     int ret;
 
     button_smf->user_data = user_data;
-    button_smf->config.button_gpio = button_gpio;
 
     memset(button_smf->button_pressed_cb, 0, sizeof(button_smf->button_pressed_cb));
     memset(button_smf->button_released_cb, 0, sizeof(button_smf->button_released_cb));
 
-    if (!gpio_is_ready_dt(button_gpio))
+    if (!gpio_is_ready_dt(&button_smf->button_gpio))
     {
         LOG_ERR("Button GPIO device not ready");
         return -ENODEV;
     }
 
-    ret = gpio_pin_configure_dt(button_gpio, GPIO_INPUT);
+    ret = gpio_pin_configure_dt(&button_smf->button_gpio, GPIO_INPUT);
     if (ret < 0)
     {
         LOG_ERR("Button GPIO could not be configured");
@@ -351,15 +354,15 @@ int button_smf_init(struct button_smf_data_t *button_smf, const struct gpio_dt_s
     k_work_init_delayable(&button_smf->button_debounce_work, button_debounce_work_cb);
     k_work_init_delayable(&button_smf->button_long_press_work, button_long_press_work_cb);
 
-    ret = gpio_pin_interrupt_configure_dt(button_gpio, GPIO_INT_EDGE_BOTH);
+    ret = gpio_pin_interrupt_configure_dt(&button_smf->button_gpio, GPIO_INT_EDGE_BOTH);
     if (ret < 0)
     {
         LOG_ERR("Button GPIO interrupt could not be configured");
         return ret;
     }
 
-    gpio_init_callback(&button_smf->button_cb_data, button_isr, BIT(button_gpio->pin));
-    ret = gpio_add_callback(button_gpio->port, &button_smf->button_cb_data);
+    gpio_init_callback(&button_smf->button_cb_data, button_isr, BIT(button_smf->button_gpio.pin));
+    ret = gpio_add_callback_dt(&button_smf->button_gpio, &button_smf->button_cb_data);
     if (ret < 0)
     {
         LOG_ERR("Button GPIO callback could not be added");
@@ -420,19 +423,21 @@ int button_smf_register_double_click_callback(struct button_smf_data_t *button_s
 
 // ============================= DT ================================
 
-/*
-#define BUTTON_SMF_DEFINE(inst)                                                \
-    static int button_smf_##inst##_init(const struct device *dev)              \
-    {                                                                          \
-        return button_smf_init(&button_smf_##inst, &button_gpio_##inst, NULL); \
-    }                                                                          \
-    static const struct button_smf_config_t button_smf_config_##inst = {       \
-        .button_gpio = DEVICE_DT_GET_OR_NULL(DT_INST_PHANDLE(inst, input)),    \
-    };                                                                         \
-    static struct button_smf_data_t button_smf_##inst = {                      \
-        .config = &button_smf_config_##inst,                                   \
-    } DEVICE_DT_INST_DEFINE(inst, button_smf_##inst##_init, NULL, &button_smf_##inst, &button_smf_config_##inst, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEVICE, NULL);
+#define BUTTON_SMF_DEFINE(inst)                                                 \
+    static struct button_smf_data_t button_smf_##inst = {                       \
+        .button_gpio = GPIO_DT_SPEC_INST_GET(i, input_gpios)};                  \
+    static int button_smf_##inst##_init(const struct device *dev)               \
+    {                                                                           \
+        struct button_smf_data_t *data = (struct button_smf_data_t *)dev->data; \
+        return button_smf_init(data, NULL);                                     \
+    }                                                                           \
+    DEVICE_DT_INST_DEFINE(inst,                                                 \
+                          button_smf_##inst##_init,                             \
+                          NULL,                                                 \
+                          &button_smf_##inst,                                   \
+                          NULL,                                                 \
+                          APPLICATION,                                          \
+                          CONFIG_KERNEL_INIT_PRIORITY_DEVICE, NULL);
 
 #define DT_DRV_COMPAT button_smf
 DT_INST_FOREACH_STATUS_OKAY(BUTTON_SMF_DEFINE)
-*/

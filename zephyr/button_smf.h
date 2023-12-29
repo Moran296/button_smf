@@ -21,11 +21,6 @@ struct button_callback_t
     button_callback_cb_t cb;
 };
 
-struct button_smf_config_t
-{
-    const struct gpio_dt_spec *button_gpio;
-};
-
 struct button_smf_data_t
 {
     struct smf_ctx ctx;
@@ -47,10 +42,10 @@ struct button_smf_data_t
 
     void *user_data;
 
-    struct button_smf_config_t config;
+    const struct gpio_dt_spec button_gpio;
 };
 
-int button_smf_init(struct button_smf_data_t *button_smf, const struct gpio_dt_spec *button_gpio, void *user_data);
+int button_smf_init(struct button_smf_data_t *button_smf, void *user_data);
 
 int button_smf_register_callback(struct button_smf_data_t *button_smf,
                                  enum button_smf_event_type event,

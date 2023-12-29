@@ -53,12 +53,12 @@ void longest_release(void *user_data)
 
 int main(void)
 {
-        int ret = button_smf_init(&button_smf, &button, NULL);
-        if (ret != 0)
-        {
-                LOG_ERR("button_smf_init failed\n");
-                return ret;
-        }
+        // int ret = button_smf_init(&button_smf, &button, NULL);
+        // if (ret != 0)
+        // {
+        //         LOG_ERR("button_smf_init failed\n");
+        //         return ret;
+        // }
 
         /*
                 Register press callbacks.
